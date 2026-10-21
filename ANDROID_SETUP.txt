@@ -1,0 +1,1 @@
+Folder ini berisi source Flutter dan file Android yang dibutuhkan sebagai referensi. Jika template Android belum lengkap, jalankan `flutter create . --platforms=android` dari root proyek, lalu pastikan AndroidManifest.xml dan MainActivity.kt tetap sesuai dengan source paket.
