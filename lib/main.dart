@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:sqflite/sqflite.dart';
+import 'heatmap_page.dart';
 
 const campusLocations = <String>[
   'Belakang masjid',
@@ -142,6 +143,15 @@ class SurveyRecord {
     upload: (map['upload'] as num?)?.toDouble(),
     note: map['note'] as String? ?? '',
   );
+}
+
+// Skor heuristik untuk membantu perbandingan, bukan sertifikasi kualitas Zoom.
+double? surveyScore(SurveyRecord r) {
+  if (r.ping == null || r.download == null || r.upload == null) return null;
+  final pingScore = (100 - (r.ping! / 2)).clamp(0, 100).toDouble();
+  final downScore = (r.download! * 2).clamp(0, 100).toDouble();
+  final upScore = (r.upload! * 5).clamp(0, 100).toDouble();
+  return pingScore * .35 + downScore * .30 + upScore * .35;
 }
 
 class SurveyDb {
@@ -303,19 +313,10 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  double? _score(SurveyRecord r) {
-    if (r.ping == null || r.download == null || r.upload == null) return null;
-    // Skor heuristik untuk membantu perbandingan, bukan sertifikasi kualitas Zoom.
-    final pingScore = (100 - (r.ping! / 2)).clamp(0, 100).toDouble();
-    final downScore = (r.download! * 2).clamp(0, 100).toDouble();
-    final upScore = (r.upload! * 5).clamp(0, 100).toDouble();
-    return pingScore * .35 + downScore * .30 + upScore * .35;
-  }
-
   Map<String, double> _locationScores() {
     final buckets = <String, List<double>>{};
     for (final record in _history) {
-      final score = _score(record);
+      final score = surveyScore(record);
       if (score != null) buckets.putIfAbsent(record.location, () => []).add(score);
     }
     return {
@@ -324,12 +325,32 @@ class _HomePageState extends State<HomePage> {
     };
   }
 
+  Future<void> _seedSampleData() async {
+    // Data contoh hanya untuk mode debug, agar warna peta bisa dicek tanpa survei lapangan.
+    for (var i = 0; i < campusLocations.length; i++) {
+      final quality = i % 3; // 0 baik, 1 cukup, 2 buruk
+      await SurveyDb.instance.insert(SurveyRecord(
+        location: campusLocations[i],
+        timestamp: DateTime.now().toIso8601String(),
+        ssid: 'DATA CONTOH',
+        rssi: [-50, -67, -82][quality],
+        ip: '-',
+        ping: [20.0, 50.0, 160.0][quality],
+        download: [40.0, 20.0, 3.0][quality],
+        upload: [15.0, 8.0, 1.0][quality],
+        note: 'DATA CONTOH',
+      ));
+    }
+    await _loadHistory();
+  }
+
   @override
   Widget build(BuildContext context) {
     final pages = [
       _surveyPage(),
       _historyPage(),
       _recommendationPage(),
+      HeatmapView(records: _history, onSeedSampleData: _seedSampleData),
     ];
     return Scaffold(
       appBar: AppBar(
@@ -349,11 +370,15 @@ class _HomePageState extends State<HomePage> {
       body: SafeArea(child: pages[_tab]),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tab,
-        onDestinationSelected: (value) => setState(() => _tab = value),
+        onDestinationSelected: (value) {
+          if (value == 3) _loadHistory();
+          setState(() => _tab = value);
+        },
         destinations: const [
           NavigationDestination(icon: Icon(Icons.radar), label: 'Survei'),
           NavigationDestination(icon: Icon(Icons.history), label: 'Riwayat'),
           NavigationDestination(icon: Icon(Icons.emoji_events_outlined), label: 'Rekomendasi'),
+          NavigationDestination(icon: Icon(Icons.map_outlined), label: 'Peta'),
         ],
       ),
     );
